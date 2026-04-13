@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AI Video Engine Pro</title>
+
+<style>
+body {
+  margin:0;
+  font-family:Arial;
+  background: radial-gradient(circle at top, #151515, #0a0a0a);
+  color:#fff;
+}
+
+.wrap { max-width:900px; margin:auto; padding:20px; }
+
+.card {
+  background: rgba(25,25,25,0.7);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding:15px;
+  border-radius:12px;
+  margin-bottom:15px;
+  box-shadow:0 10px 30px rgba(0,0,0,0.4);
+  transition:0.2s;
+}
+
+.card:hover { transform:translateY(-2px); }
+
+textarea, input {
+  width:100%;
+  padding:10px;
+  margin-top:8px;
+  background:#111;
+  color:#fff;
+  border:1px solid #333;
+  border-radius:8px;
+}
+
+button {
+  padding:10px 14px;
+  border:none;
+  border-radius:8px;
+  cursor:pointer;
+  margin-top:10px;
+  background:#00e5a0;
+  font-weight:bold;
+  transition:0.2s;
+}
+
+button:hover {
+  transform:translateY(-2px);
+  box-shadow:0 8px 20px rgba(0,229,160,0.25);
+}
+
+button:active { transform:scale(0.98); }
+
+.secondary { background:#333; color:#fff; }
+
+.scene {
+  background:#111;
+  padding:10px;
+  margin-top:10px;
+  border-radius:8px;
+  border-left:3px solid #00e5a0;
+  transition:0.2s;
+}
+
+.scene:hover { transform:scale(1.01); border-left-width:6px; }
+
+img {
+  width:100%;
+  border-radius:10px;
+  margin-top:10px;
+}
+
+.hidden { display:none; }
+
+.preview {
+  background:#111;
+  padding:10px;
+  border-radius:10px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="wrap">
+
+<h2>🎬 AI Video Engine Pro</h2>
+
+<div class="card">
+  <h3>Script Input</h3>
+  <textarea id="script" rows="6" placeholder="Paste your script..."></textarea>
+  <input id="apiKey" placeholder="Groq API Key (optional)"/>
+  <button onclick="generate()">Generate Video</button>
+</div>
+
+<div class="card hidden" id="sceneBox">
+  <h3>Scenes</h3>
+  <div id="scenes"></div>
+</div>
+
+<div class="card hidden" id="previewBox">
+  <h3>Preview</h3>
+
+  <div class="preview">
+    <img id="img"/>
+    <p id="txt"></p>
+  </div>
+
+  <button class="secondary" onclick="prev()">Prev</button>
+  <button class="secondary" onclick="next()">Next</button>
+  <button onclick="play()">▶ Play</button>
+  <button onclick="exportVideo()">🎬 Export</button>
+</div>
+
+</div>
+
+<script>
+
+let scenes = [];
+let i = 0;
+let playing = false;
+let timer = null;
+
+function buildPrompt(text){
+  return `cinematic ultra realistic film still, dramatic lighting, ${text}, 4k, shallow depth of field`;
+}
+
+async function generate(){
+
+  const text = document.getElementById("script").value;
+  const key = document.getElementById("apiKey").value;
+
+  if(!text) return alert("Add script");
+
+  const words = text.split(" ");
+  const chunk = Math.ceil(words.length / 5);
+
+  scenes = [];
+
+  for(let x=0;x<5;x++){
+    const part = words.slice(x*chunk,(x+1)*chunk).join(" ");
+
+    scenes.push({
+      text: part || "Scene " + (x+1),
+      image: ""
+    });
+  }
+
+  if(key){
+    try{
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions",{
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "Authorization":"Bearer "+key
+        },
+        body:JSON.stringify({
+          model:"llama3-70b-8192",
+          messages:[{
+            role:"user",
+            content:`Return JSON 5 scenes:[{"text":"..."}] Script:${text}`
+          }]
+        })
+      });
+
+      const data = await res.json();
+      let out = data.choices[0].message.content.replace(/```json|```/g,"");
+      const parsed = JSON.parse(out);
+
+      parsed.forEach((p,idx)=>{
+        if(scenes[idx]) scenes[idx].text = p.text;
+      });
+
+    }catch(e){}
+  }
+
+  scenes.forEach(s=>{
+    const prompt = buildPrompt(s.text);
+    s.image = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`;
+  });
+
+  render();
+}
+
+function render(){
+
+  document.getElementById("sceneBox").classList.remove("hidden");
+  document.getElementById("previewBox").classList.remove("hidden");
+
+  const box = document.getElementById("scenes");
+  box.innerHTML = "";
+
+  scenes.forEach((s,idx)=>{
+    box.innerHTML += `
+      <div class="scene">
+        <b>Scene ${idx+1}</b>
+        <p>${s.text}</p>
+        <img src="${s.image}">
+      </div>
+    `;
+  });
+
+  show(0);
+}
+
+function show(n){
+  i = n;
+  document.getElementById("img").src = scenes[i].image;
+  document.getElementById("txt").innerText = scenes[i].text;
+}
+
+function next(){ i=(i+1)%scenes.length; show(i); }
+function prev(){ i=(i-1+scenes.length)%scenes.length; show(i); }
+
+function play(){
+  playing = !playing;
+  if(playing) run();
+  else clearTimeout(timer);
+}
+
+function run(){
+  if(!playing) return;
+
+  show(i);
+
+  timer = setTimeout(()=>{
+    i=(i+1)%scenes.length;
+    run();
+  },2200);
+}
+
+async function exportVideo(){
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+
+  canvas.width = 720;
+  canvas.height = 1280;
+
+  const stream = canvas.captureStream(30);
+  const recorder = new MediaRecorder(stream);
+
+  let chunks = [];
+
+  recorder.ondataavailable = e => chunks.push(e.data);
+  recorder.start();
+
+  for(const s of scenes){
+
+    const img = new Image();
+    img.src = s.image;
+    await new Promise(r=>img.onload=r);
+
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+
+    ctx.fillStyle="rgba(0,0,0,0.6)";
+    ctx.fillRect(0,canvas.height-200,canvas.width,200);
+
+    ctx.fillStyle="#fff";
+    ctx.font="28px Arial";
+    ctx.textAlign="center";
+    ctx.fillText(s.text,canvas.width/2,canvas.height-100);
+
+    await new Promise(r=>setTimeout(r,2000));
+  }
+
+  recorder.stop();
+
+  recorder.onstop=()=>{
+    const blob=new Blob(chunks,{type:"video/mp4"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download="ai-video-engine.mp4";
+    a.click();
+  };
+}
+
+</script>
+
+</body>
+</html>
